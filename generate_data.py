@@ -40,7 +40,11 @@ class PendulumSimulation(eqx.Module):
         gravity: Float,
         length: Float,
     ):
-        # Fill in detail here
+        initial_state = [initial_angle, initial_velocity]
+        args = [gravity, length]
+        term = dx.ODETerm(self.ODE_system)
+        solver = dx.Tsit5()
+        saveat = dx.SaveAt(ts=jnp.arange(0, self.time, self.save_interval * self.dt))
         sol = dx.diffeqsolve(
             term,
             solver,
@@ -60,14 +64,25 @@ class PendulumSimulation(eqx.Module):
         length: Float,
     ) -> Float[Array, " n_res n_res"]:
         image = jnp.zeros((self.image_size, self.image_size)).reshape(-1)
-        grid_x, grid_y = # Make x-y coordinate
+        grid_x, grid_y = jnp.meshgrid(
+            jnp.linspace(-self.box_size, self.box_size, self.image_size),
+            jnp.linspace(-self.box_size, self.box_size, self.image_size),
+        )
 
-        coordinates = # Stack the coordination
+        coordinates = jnp.stack([grid_x, grid_y], axis=-1)
 
-        position = # Compute the position of the ball
+        position = jnp.array([length * jnp.sin(angle), length * jnp.cos(angle)])
 
-        distance = # Compute distance from pixels to ball
-        image = # Set pixel values correspondingly
+        distance = jnp.linalg.norm(coordinates - position, axis=-1)
+
+        image = jnp.where(distance < self.ball_size, 1.0, 0.0)
+         # Plot the image as a 2D image
+
+        #plt.imshow(image, cmap='gray')
+        #plt.colorbar() 
+        #plt.title(f"Pendulum Render at Angle {angle:.2f} radians")
+        #plt.show()
+
         return image.reshape(self.image_size, self.image_size)
 
     def generate_dataset(
@@ -82,13 +97,19 @@ class PendulumSimulation(eqx.Module):
         inputs = []
         outputs = []
         for i in range(n_sims):
-            # Generate random initial conditions
-            initial_angle = # Fill in detail here
-            initial_velocity = # Fill in detail here
+            initial_angle = jax.random.uniform(
+                jax.random.PRNGKey(i), minval=-jnp.pi, maxval=jnp.pi
+            )
+            initial_velocity = jax.random.uniform(
+                jax.random.PRNGKey(i * 1029423), minval=-10.0, maxval=10.0
+            )
+
             solution = self.simulate_pendulum(
                 initial_angle, initial_velocity, gravity, length
             )
-            frames = # Render frames
+            frames = jax.vmap(self.render_pendulum, in_axes=(0, 0, None))(
+                solution.ys[0], solution.ys[1], length
+            )
             inputs.append(jnp.stack([frames[:-2], frames[1:-1]], axis=1))
             outputs.append(frames[2:])
         return jnp.stack(inputs).reshape(
